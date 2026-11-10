@@ -67,14 +67,14 @@ while($true){ $t=Get-Date -f HH:mm:ss.fff
   Start-Sleep -Milliseconds 400 }
 ```
 
-### 5. Planned failover (~20 s outage)
+### 5. Planned failover (~15-50 s outage)
 On n1 or n2:
 ```powershell
 Move-ClusterGroup -Name 'SQL Server (MSSQLSERVER)'
 ```
-Watch the probe go FAIL for about 20 s, then OK from the other node.
+Watch the probe go FAIL for 15 to 50 s, then OK from the other node.
 
-### 6. Hard failure (~37-40 s outage)
+### 6. Hard failure (~35-50 s outage)
 Pick one:
 - Harvester UI: the owner VM > Force Stop. The role moves to the other node. The stopped VM may NOT
   restart by itself (harvester#11835); Start it manually.

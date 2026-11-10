@@ -26,7 +26,11 @@ try {
   Remove-Item C:\virtio-win.iso -Force
 
   # Failover Clustering here so the pending reboot is consumed before SQL setup
-  Install-WindowsFeature Failover-Clustering -IncludeManagementTools | Out-Null
+  # Right after the driver swap DISM can answer 0x80010108 (RPC disconnected) for a while: retry
+  for ($i = 1; $i -le 6; $i++) {
+    try { Install-WindowsFeature Failover-Clustering -IncludeManagementTools -ErrorAction Stop | Out-Null; break }
+    catch { if ($i -eq 6) { throw }; "Install-WindowsFeature attempt $i failed: $($_.Exception.Message.Split([char]10)[0]); retrying in 30 s"; Start-Sleep 30 }
+  }
   Set-Content C:\prepnode.done ok
   Stop-Transcript
   Restart-Computer -Force

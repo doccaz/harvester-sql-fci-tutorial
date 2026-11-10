@@ -13,3 +13,5 @@ for v in $DC $N1 $N2; do
   for i in $(seq 1 60); do bash "$ROOT/vm/setpw.sh" $v >/dev/null 2>&1 && break; sleep 10; done
 done
 for v in $DC $N1 $N2; do wait_winrm "$(vm_ip $v)" local 900; echo "$v: WinRM ok as $(wr "$(vm_ip $v)" 'whoami' | tr -d '\r')"; done
+say "disabling Windows Update on all VMs (a background update breaks feature installs, see ps/no-windows-update.ps1)"
+for v in $DC $N1 $N2; do wr "$(vm_ip $v)" "$(cat "$HERE/ps/no-windows-update.ps1")" | tr -d '\r'; done

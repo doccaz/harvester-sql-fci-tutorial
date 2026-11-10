@@ -67,14 +67,14 @@ while($true){ $t=Get-Date -f HH:mm:ss.fff
   Start-Sleep -Milliseconds 400 }
 ```
 
-### 5. Failover planejado (~16-20 s de indisponibilidade)
+### 5. Failover planejado (~15-50 s de indisponibilidade)
 No n1 ou n2:
 ```powershell
 Move-ClusterGroup -Name 'SQL Server (MSSQLSERVER)'
 ```
-Observe a sonda mostrar FAIL por cerca de 20 s e depois OK a partir do outro nó.
+Observe a sonda mostrar FAIL por 15 a 50 s e depois OK a partir do outro nó.
 
-### 6. Falha abrupta (~37-40 s de indisponibilidade)
+### 6. Falha abrupta (~35-50 s de indisponibilidade)
 Escolha uma:
 - UI do Harvester: VM proprietária > Force Stop. A função vai para o outro nó. A VM parada pode NÃO reiniciar
   sozinha (harvester#11835); inicie manualmente.

@@ -8,6 +8,7 @@ fi
 for i in $(seq 1 30); do dwr $IP_N1 'Get-ClusterNode | % State' 2>/dev/null | grep -c Up | grep -q 2 && break; sleep 10; done
 say "n1: InstallFailoverCluster (long)"; MODE=FCI rt $IP_N1 "$HERE/ps/sql-install.ps1" 5400 | tee /tmp/.sql1.$$
 grep -q 'SETUP_EXIT=0' /tmp/.sql1.$$ || { rm -f /tmp/.sql1.$$; die "n1 setup failed (C:\\Program Files\\Microsoft SQL Server\\130\\Setup Bootstrap\\Log on n1)"; }; rm -f /tmp/.sql1.$$
+say "n2: copy the SQL resource DLLs from n1 (see ps/copy-sql-dlls.ps1)"; rt $IP_N2 "$HERE/ps/copy-sql-dlls.ps1" 300
 say "n2: AddNode";  MODE=ADD rt $IP_N2 "$HERE/ps/sql-install.ps1" 3600 | tee /tmp/.sql2.$$
 grep -q 'SETUP_EXIT=0' /tmp/.sql2.$$ || { rm -f /tmp/.sql2.$$; die "n2 AddNode failed"; }; rm -f /tmp/.sql2.$$
 say "firewall (both nodes)"
