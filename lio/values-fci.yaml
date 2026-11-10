@@ -1,0 +1,12 @@
+# LIO targets for the SQL FCI lab: the two existing PR-lab LUNs plus the three FCI LUNs.
+# helm upgrade pr-lab lio/chart -f lio/values-fci.yaml \
+#   --set namespace.name=iscsi-target-prlab --set nodeSelector."kubernetes\.io/hostname"=node-a
+targets:
+  - {name: pr-witness,  iqn: "iqn.2024-01.com.example:pr-witness",  device: /dev/iscsi-pr-witness,  storage: 1Gi}
+  - {name: pr-data,     iqn: "iqn.2024-01.com.example:pr-data",     device: /dev/iscsi-pr-data,     storage: 5Gi}
+  - {name: fci-quorum,  iqn: "iqn.2024-01.com.example:fci-quorum",  device: /dev/iscsi-fci-quorum,  storage: 1Gi}
+  - {name: fci-sqldata, iqn: "iqn.2024-01.com.example:fci-sqldata", device: /dev/iscsi-fci-sqldata, storage: 4Gi}
+  - {name: fci-sqllog,  iqn: "iqn.2024-01.com.example:fci-sqllog",  device: /dev/iscsi-fci-sqllog,  storage: 2Gi}
+storageClassName: harvester-2replicas
+writeProtect: false
+hostNetwork: true

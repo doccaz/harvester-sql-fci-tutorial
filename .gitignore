@@ -1,0 +1,8 @@
+env.local
+*.secret
+runbook/.venv/
+runbook/.iso-base
+iso/*.iso
+runbook/reports/*.htm
+reference/
+tools/

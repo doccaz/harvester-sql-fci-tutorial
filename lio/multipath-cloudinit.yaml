@@ -1,0 +1,85 @@
+# DRAFT - not applied. Persistent node config for SCSI-3 PR with native lun disks.
+#
+# CR 1 (both workers): multipath scoped ONLY to the SAN vendor (LIO-ORG here; replace with the
+#   real array's vendor/product), reservation_key file, skip_kpartx, /etc/multipath 0755, multipathd on.
+#   Everything else stays blacklisted so local disks / Longhorn IET devices are never claimed.
+# CR 2 (node-a only, LAB ONLY): the Linux LIO target stands in for the SAN and the kernel target
+#   needs /etc/target/pr to store reservation state (else every REGISTER returns
+#   "LOGICAL UNIT COMMUNICATION FAILURE" after taking effect). A real SAN does not need this.
+#
+# Apply:  kubectl apply -f lio/multipath-cloudinit.yaml
+# Run now without reboot (on each node):  sudo elemental cloud-init -s boot /oem/95_multipath.yaml
+# NOTE: reservation_key is not valid in a device{} section (multipath 0.12); it lives in defaults{} - safe
+# because everything except the SAN vendor is blacklisted.
+# Unverified: the yip `directories`/`systemctl enable` keys and the exact multipath.conf semantics
+# on this Harvester build - check on one node before the second.
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: pr-multipath
+spec:
+  matchSelector:
+    node-role.kubernetes.io/control-plane: "true"   # node-a + node-b (not witness-node)
+  filename: /oem/95_multipath.yaml
+  paused: false
+  contents: |
+    name: "SCSI-3 PR: scoped multipath for the shared SAN"
+    stages:
+      boot:
+        - name: "multipath config + 0755 dirs + enable multipathd"
+          directories:
+            - path: /etc/multipath
+              permissions: 0755
+            - path: /etc/multipath/conf.d
+              permissions: 0755
+          files:
+            - path: /etc/multipath.conf
+              permissions: 0644
+              content: |
+                defaults {
+                    user_friendly_names no
+                    skip_kpartx yes
+                    reservation_key file
+                }
+                blacklist {
+                    devnode ".*"
+                }
+                blacklist_exceptions {
+                    device {
+                        vendor "LIO-ORG"
+                        product ".*"
+                    }
+                }
+                devices {
+                    device {
+                        vendor "LIO-ORG"
+                        product ".*"
+                        skip_kpartx yes
+                    }
+                }
+          commands:
+            - modprobe dm_multipath || true
+            - chmod 0755 /etc/multipath /etc/multipath/conf.d
+          systemctl:
+            enable:
+              - multipathd
+            start:
+              - multipathd
+---
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: pr-lab-lio-aptpl-dir
+spec:
+  matchSelector:
+    kubernetes.io/hostname: node-a   # node running the lab LIO pod
+  filename: /oem/96_lio_aptpl.yaml
+  paused: false
+  contents: |
+    name: "Lab LIO target: reservation state dir"
+    stages:
+      boot:
+        - name: "create /etc/target/pr"
+          directories:
+            - path: /etc/target/pr
+              permissions: 0755

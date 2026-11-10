@@ -1,0 +1,66 @@
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: fci-quorum, labels: {app: sqllab-fci}}
+spec:
+  capacity: {storage: 1Gi}
+  accessModes: [ReadWriteMany]
+  volumeMode: Block
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef: {namespace: labs, name: fci-quorum}
+  iscsi: {targetPortal: "__LIO_PORTAL__:3260", iqn: "iqn.2024-01.com.example:fci-quorum", lun: 0, fsType: ""}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: fci-quorum, namespace: labs, labels: {app: sqllab-fci}}
+spec:
+  accessModes: [ReadWriteMany]
+  volumeMode: Block
+  storageClassName: ""
+  volumeName: fci-quorum
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: fci-sqldata, labels: {app: sqllab-fci}}
+spec:
+  capacity: {storage: 4Gi}
+  accessModes: [ReadWriteMany]
+  volumeMode: Block
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef: {namespace: labs, name: fci-sqldata}
+  iscsi: {targetPortal: "__LIO_PORTAL__:3260", iqn: "iqn.2024-01.com.example:fci-sqldata", lun: 0, fsType: ""}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: fci-sqldata, namespace: labs, labels: {app: sqllab-fci}}
+spec:
+  accessModes: [ReadWriteMany]
+  volumeMode: Block
+  storageClassName: ""
+  volumeName: fci-sqldata
+  resources: {requests: {storage: 4Gi}}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: fci-sqllog, labels: {app: sqllab-fci}}
+spec:
+  capacity: {storage: 2Gi}
+  accessModes: [ReadWriteMany]
+  volumeMode: Block
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef: {namespace: labs, name: fci-sqllog}
+  iscsi: {targetPortal: "__LIO_PORTAL__:3260", iqn: "iqn.2024-01.com.example:fci-sqllog", lun: 0, fsType: ""}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: fci-sqllog, namespace: labs, labels: {app: sqllab-fci}}
+spec:
+  accessModes: [ReadWriteMany]
+  volumeMode: Block
+  storageClassName: ""
+  volumeName: fci-sqllog
+  resources: {requests: {storage: 2Gi}}

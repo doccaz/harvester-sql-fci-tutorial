@@ -1,0 +1,309 @@
+#!/bin/bash
+# harvester-pr - helper for shared SCSI-3 persistent-reservation (PR) disks on
+# Harvester (KubeVirt `lun` + reservation). SCAFFOLD: see docs/shared-pr-disks.md.
+#
+#   harvester-pr check                      read-only platform + VM report
+#   harvester-pr convert-vm <ns>/<vm> <pvc>... [--apply] [--stop]
+#                                            turn the named shared PVC disks into
+#                                            lun+reservation (dry run by default)
+#   harvester-pr verify <ns>/<vm>           is PR wired into the running QEMU?
+#
+#   harvester-pr enable  [--apply] [--image IMG]   pr-helper image fix + PR gate (dry run by default)
+#   harvester-pr disable [--apply] [--force]        undo it; run BEFORE a Harvester upgrade
+# Only Harvester v1.9.0 is supported.
+#
+# Needs: kubectl, jq. `verify` needs a running VM. Optional for `check`:
+#   HARVESTER_PR_SSH_USER=rancher   compare the nodes' iSCSI initiator names.
+# Respects KUBECONFIG and KUBECTL_EXTRA_ARGS (e.g. --insecure-skip-tls-verify).
+set -euo pipefail
+
+k() { kubectl ${KUBECTL_EXTRA_ARGS:-} "$@"; }
+die() { echo "error: $*" >&2; exit 1; }
+warn() { echo "WARN: $*" >&2; }
+need() { command -v "$1" >/dev/null || die "$1 not found"; }
+need kubectl; need jq
+
+# Only Harvester v1.9.0 is covered (the upstream article validates nothing else).
+SUPPORTED_HV="v1.9.0"
+hv_version() { k get settings.harvesterhci.io server-version -o jsonpath='{.value}' 2>/dev/null || echo "?"; }
+require_supported() {
+  local hv; hv=$(hv_version)
+  [ "$hv" = "$SUPPORTED_HV" ] && return 0
+  [ "${HARVESTER_PR_ALLOW_OTHER:-}" = 1 ] && { warn "Harvester $hv is not validated (only $SUPPORTED_HV); continuing"; return 0; }
+  die "Harvester $hv: only $SUPPORTED_HV is supported (set HARVESTER_PR_ALLOW_OTHER=1 to override at your own risk)"
+}
+
+# ---- check -------------------------------------------------------------------
+cmd_check() {
+  local hv kvimg kvtag gate cfg
+  hv=$(k get settings.harvesterhci.io server-version -o jsonpath='{.value}' 2>/dev/null || echo "?")
+  kvimg=$(k -n harvester-system get deploy virt-operator -o jsonpath='{.spec.template.spec.containers[0].image}')
+  kvtag="${kvimg##*:}"
+  gate=$(k -n harvester-system get kubevirt kubevirt -o json | jq -r \
+    '(.spec.configuration.developerConfiguration.featureGates // []) | index("PersistentReservation") | if . == null then "absent" else "present" end')
+  cfg=$(k -n harvester-system get kubevirt kubevirt -o json | jq -r \
+    '.spec.configuration.persistentReservationConfiguration.enabled // "unset"')
+  local setting
+  setting=$(k get settings.harvesterhci.io persistent-reservation-enabled -o jsonpath='{.value}' 2>/dev/null || echo "n/a")
+  local override
+  override=$(k -n harvester-system get deploy virt-operator -o json | jq -r \
+    '[.spec.template.spec.containers[0].env[]? | select(.name=="PR_HELPER_IMAGE") | .value][0] // "unset"')
+
+  [ "$hv" = "$SUPPORTED_HV" ] || warn "Harvester $hv is not validated; only $SUPPORTED_HV is supported"
+  echo "Harvester            : $hv"
+  echo "KubeVirt             : $kvtag"
+  echo "feature gate         : $gate   (KubeVirt < 1.9)"
+  echo "kubevirt config      : persistentReservationConfiguration.enabled=$cfg   (KubeVirt >= 1.9)"
+  echo "harvester setting    : persistent-reservation-enabled=$setting"
+  echo "PR_HELPER_IMAGE      : $override"
+  echo
+  echo "virt-handler:"
+  k -n harvester-system get pods -l kubevirt.io=virt-handler -o json | jq -r \
+    '.items[] | "  \(.metadata.name)  node=\(.spec.nodeName)  ready=\([.status.containerStatuses[]?.ready]|map(tostring)|join(","))  restarts=\([.status.containerStatuses[]?.restartCount]|map(tostring)|join(","))  containers=\([.spec.containers[].name]|join(","))"'
+  if [ "$gate" = absent ] && [ "$cfg" = unset ] && { [ "$setting" = "n/a" ] || [ "$setting" = "false" ]; }; then
+    echo "  -> PR is not enabled."
+  fi
+
+  echo
+  echo "Nodes (iSCSI initiator names must be unique):"
+  if [ -n "${HARVESTER_PR_SSH_USER:-}" ]; then
+    local ip iqn; declare -A seen=()
+    for ip in $(k get nodes -o json | jq -r '.items[] | select((.metadata.labels["node-role.harvesterhci.io/witness"]//"")!="true") | .status.addresses[] | select(.type=="InternalIP") | .address'); do
+      iqn=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$HARVESTER_PR_SSH_USER@$ip" \
+        "sudo sh -c \"grep -v '^#' /etc/iscsi/initiatorname.iscsi\"" 2>/dev/null || echo "?")
+      echo "  $ip  $iqn"
+      [ "$iqn" != "?" ] && { [ -n "${seen[$iqn]:-}" ] && warn "$ip shares an initiator name with ${seen[$iqn]}"; seen[$iqn]=$ip; }
+    done
+  else
+    echo "  (skipped: set HARVESTER_PR_SSH_USER to compare /etc/iscsi/initiatorname.iscsi)"
+  fi
+
+  echo
+  echo "VMs with persistent-reservation disks:"
+  local vms
+  vms=$(k get vm -A -o json | jq -r '.items[]
+    | select([.spec.template.spec.domain.devices.disks[]? | select(.lun.reservation==true)] | length > 0)
+    | "\(.metadata.namespace)/\(.metadata.name)\t\([.spec.template.spec.domain.devices.disks[] | select(.lun.reservation==true) | .name] | join(","))"')
+  if [ -z "$vms" ]; then echo "  (none)"; return; fi
+  local ref disks node
+  declare -A bynode=()
+  while IFS=$'\t' read -r ref disks; do
+    node=$(k -n "${ref%%/*}" get vmi "${ref##*/}" -o jsonpath='{.status.nodeName}' 2>/dev/null || true)
+    echo "  $ref  disks=$disks  node=${node:-<not running>}"
+    [ -n "$node" ] && bynode[$node]="${bynode[$node]:-} $ref"
+  done <<<"$vms"
+  local n
+  for n in "${!bynode[@]}"; do
+    [ "$(wc -w <<<"${bynode[$n]}")" -gt 1 ] && \
+      warn "PR VMs share host $n:${bynode[$n]} (two VMs on one host cannot fence each other if they use the same LUN)"
+  done
+  if [ "$gate" = absent ] && [ "$cfg" = unset ] && [ "$setting" != "true" ]; then
+    warn "PR VMs exist but PR is not enabled: they will fail to start (a Harvester upgrade reverts the gate)"
+  fi
+}
+
+# ---- convert-vm ----------------------------------------------------------------
+cmd_convert_vm() {
+  local apply=0 stop=0 ref="" pvcs=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --apply) apply=1 ;;
+      --stop)  stop=1 ;;
+      -*)      die "unknown option $1" ;;
+      *)       if [ -z "$ref" ]; then ref="$1"; else pvcs+=("$1"); fi ;;
+    esac
+    shift
+  done
+  [[ "$ref" == */* ]] || die "usage: convert-vm <ns>/<vm> <pvc>... [--apply] [--stop]"
+  [ ${#pvcs[@]} -gt 0 ] || die "name at least one PVC"
+  local ns="${ref%%/*}" vm="${ref##*/}"
+  require_supported
+  local vmjson; vmjson=$(k -n "$ns" get vm "$vm" -o json) || die "VM $ref not found"
+
+  # PR must be on, otherwise the VM would not start afterwards.
+  local gate cfg setting
+  gate=$(k -n harvester-system get kubevirt kubevirt -o json | jq -r '(.spec.configuration.developerConfiguration.featureGates // []) | index("PersistentReservation") != null')
+  cfg=$(k -n harvester-system get kubevirt kubevirt -o json | jq -r '.spec.configuration.persistentReservationConfiguration.enabled // false')
+  setting=$(k get settings.harvesterhci.io persistent-reservation-enabled -o jsonpath='{.value}' 2>/dev/null || echo false)
+  if [ "$gate" != true ] && [ "$cfg" != true ] && [ "$setting" != true ]; then
+    [ $apply -eq 1 ] && die "persistent reservation is not enabled in KubeVirt (run: harvester-pr check)"
+    warn "persistent reservation is not enabled; --apply would refuse"
+  fi
+
+  # Validate each PVC and map it to the VM's volume (= disk) name.
+  local pvc vol bad=0 names=()
+  for pvc in "${pvcs[@]}"; do
+    local p; p=$(k -n "$ns" get pvc "$pvc" -o json 2>/dev/null) || { echo "  $pvc: PVC not found in $ns" >&2; bad=1; continue; }
+    jq -e '(.spec.volumeMode=="Block") and (.spec.accessModes|index("ReadWriteMany")!=null)' <<<"$p" >/dev/null \
+      || { echo "  $pvc: must be volumeMode Block and ReadWriteMany (is: $(jq -c '[.spec.volumeMode,.spec.accessModes]' <<<"$p"))" >&2; bad=1; }
+    vol=$(jq -r --arg c "$pvc" '[.spec.template.spec.volumes[]? | select(.persistentVolumeClaim.claimName==$c) | .name][0] // empty' <<<"$vmjson")
+    [ -n "$vol" ] || { echo "  $pvc: not attached to $ref (add it with 'Add Existing Volume' first)" >&2; bad=1; continue; }
+    if jq -e --arg n "$vol" '.spec.template.spec.domain.devices.disks[] | select(.name==$n) | select(.bootOrder==1)' <<<"$vmjson" >/dev/null; then
+      echo "  $pvc: disk $vol is the boot disk" >&2; bad=1
+    fi
+    names+=("$vol")
+  done
+  [ $bad -eq 0 ] || die "fix the problems above"
+
+  local before after
+  before=$(jq -cS '.spec.template.spec.domain.devices.disks' <<<"$vmjson")
+  after=$(jq -c --argjson names "$(printf '%s\n' "${names[@]}" | jq -R . | jq -sc .)" '
+    .spec.template.spec.domain.devices.disks
+    | map(if (.name as $n | $names | index($n)) then
+        {name: .name, shareable: true, errorPolicy: "report", lun: {bus: "scsi", reservation: true}}
+      else . end)' <<<"$vmjson" | jq -cS .)
+  if [ "$before" = "$after" ]; then echo "$ref: nothing to do (already lun+reservation)"; return 0; fi
+
+  echo "$ref disks, before -> after:"
+  diff <(jq -S . <<<"$before") <(jq -S . <<<"$after") || true
+
+  # Placement hint for cluster VMs.
+  jq -e '.spec.template.spec.nodeSelector // .spec.template.spec.affinity' <<<"$vmjson" >/dev/null 2>&1 \
+    || warn "$ref has no nodeSelector/affinity: pin each cluster VM to its own host"
+
+  local running; running=$(k -n "$ns" get vmi "$vm" -o name 2>/dev/null || true)
+  if [ -n "$running" ]; then
+    if [ $stop -eq 1 ] && [ $apply -eq 1 ]; then
+      need virtctl; echo "stopping $ref"; virtctl stop -n "$ns" "$vm" >/dev/null 2>&1 || true
+      k -n "$ns" wait --for=delete "vmi/$vm" --timeout=180s
+    else
+      [ $apply -eq 1 ] && die "$ref is running; stop it first or pass --stop"
+      warn "$ref is running (--apply needs it stopped, or use --stop)"
+    fi
+  fi
+  [ $apply -eq 1 ] || { echo "dry run only; re-run with --apply"; return 0; }
+  k -n "$ns" patch vm "$vm" --type=json \
+    -p "[{\"op\":\"replace\",\"path\":\"/spec/template/spec/domain/devices/disks\",\"value\":$after}]"
+  echo "applied. Start the VM, then: harvester-pr verify $ref"
+}
+
+# ---- verify --------------------------------------------------------------------
+cmd_verify() {
+  local ref="${1:-}"; [[ "$ref" == */* ]] || die "usage: verify <ns>/<vm>"
+  local ns="${ref%%/*}" vm="${ref##*/}" pod xml
+  pod=$(k -n "$ns" get pods -l "vm.kubevirt.io/name=$vm" -o name | tail -1)
+  [ -n "$pod" ] || die "no virt-launcher pod for $ref (is the VM running?)"
+  xml=$(k -n "$ns" exec "$pod" -c compute -- virsh \
+    --connect 'qemu+unix:///session?socket=/var/run/libvirt/virtqemud-sock' dumpxml "${ns}_${vm}") \
+    || die "could not read the domain XML"
+  echo "$xml" | grep -E "device='lun'|<reservations|pr-helper|<target dev=.sd" || true
+  local luns res
+  luns=$(grep -c "device='lun'" <<<"$xml" || true); res=$(grep -c "<reservations" <<<"$xml" || true)
+  echo "lun disks: $luns   with reservations: $res"
+  [ "$luns" -gt 0 ] && [ "$luns" -eq "$res" ] && echo "OK" || { echo "NOT OK"; return 1; }
+}
+
+# ---- enable / disable ------------------------------------------------------------
+# v1.9.0 only: PersistentReservation feature gate + a pr-helper image override when
+# the image KubeVirt derives from its own tag is missing (it was, on the lab).
+PR_IMAGE_FALLBACK="registry.suse.com/suse/sles/16.0/pr-helper:1.8.4-11.9"
+HS=harvester-system
+
+pr_env_override() { k -n $HS get deploy virt-operator -o json | jq -r \
+  '[.spec.template.spec.containers[0].env[]? | select(.name=="PR_HELPER_IMAGE") | .value][0] // ""'; }
+pr_gate_present() { k -n $HS get kubevirt kubevirt -o json | jq -e \
+  '(.spec.configuration.developerConfiguration.featureGates // []) | index("PersistentReservation") != null' >/dev/null; }
+# image_ok <image>: 0 if it exists and declares /entrypoint.sh
+image_ok() {
+  jq -e '.config.Entrypoint[0] == "/entrypoint.sh"' \
+    < <(skopeo inspect --config --override-os linux --override-arch amd64 "docker://$1" 2>/dev/null) >/dev/null
+}
+# wait_pr_helper present|absent: every virt-handler pod has / lacks the container
+wait_pr_helper() {
+  local want=$1 i out
+  for i in $(seq 1 36); do
+    out=$(k -n $HS get pods -l kubevirt.io=virt-handler -o json | jq -r --arg w "$want" '
+      [.items[] | ([.spec.containers[].name] | index("pr-helper") != null)] as $h
+      | if ($h|length)==0 then "no" elif ($w=="present" and ($h|all)) or ($w=="absent" and ($h|any|not)) then "yes" else "no" end')
+    [ "$out" = yes ] && return 0
+    sleep 5
+  done
+  return 1
+}
+
+cmd_enable() {
+  local apply=0 image=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --apply) apply=1 ;; --image) image="${2:?--image needs a value}"; shift ;; *) die "unknown option $1" ;; esac
+    shift
+  done
+  require_supported
+  local opimg tag derived want="" cur
+  opimg=$(k -n $HS get deploy virt-operator -o jsonpath='{.spec.template.spec.containers[0].image}')
+  tag="${opimg##*:}"; derived="${opimg%/virt-operator:*}/pr-helper:${tag}"
+  cur=$(pr_env_override)
+  if [ -n "$image" ]; then
+    want="$image"
+  else
+    need skopeo
+    if image_ok "$derived"; then want=""; echo "derived pr-helper image $derived: OK, no override needed"
+    else
+      echo "derived pr-helper image $derived: missing or without /entrypoint.sh"
+      image_ok "$PR_IMAGE_FALLBACK" || die "fallback image $PR_IMAGE_FALLBACK is not usable either; pass --image"
+      want="$PR_IMAGE_FALLBACK"
+    fi
+  fi
+  echo "plan:"
+  if [ -n "$want" ] && [ "$cur" != "$want" ]; then echo "  1. virt-operator PR_HELPER_IMAGE=$want (rollout)"
+  elif [ -z "$want" ] && [ -n "$cur" ]; then echo "  1. remove leftover PR_HELPER_IMAGE=$cur (rollout)"
+  else echo "  1. pr-helper image already as wanted"; fi
+  if pr_gate_present; then echo "  2. PersistentReservation gate already present"; else echo "  2. add the PersistentReservation feature gate"; fi
+  echo "  3. wait for pr-helper in virt-handler (2/2 Running, 0 restarts)"
+  [ $apply -eq 1 ] || { echo "dry run only; re-run with --apply"; return 0; }
+
+  # Image first: enabling with a broken image crash-loops virt-handler on every node.
+  if [ -n "$want" ] && [ "$cur" != "$want" ]; then
+    k -n $HS set env deploy/virt-operator PR_HELPER_IMAGE="$want"; k -n $HS rollout status deploy/virt-operator --timeout=5m
+  elif [ -z "$want" ] && [ -n "$cur" ]; then
+    k -n $HS set env deploy/virt-operator PR_HELPER_IMAGE-; k -n $HS rollout status deploy/virt-operator --timeout=5m
+  fi
+  pr_gate_present || k -n $HS patch kubevirt kubevirt --type=json \
+    -p '[{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"PersistentReservation"}]'
+  echo "waiting for pr-helper in virt-handler"
+  wait_pr_helper present || die "no pr-helper in virt-handler after 3 min; check virt-operator logs (to back out: harvester-pr disable --apply)"
+  k -n $HS rollout status ds/virt-handler --timeout=10m
+  k -n $HS get pods -l kubevirt.io=virt-handler -o custom-columns='POD:.metadata.name,NODE:.spec.nodeName,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount'
+  echo "enabled. Re-run 'harvester-pr check' in a minute to confirm nothing was reverted."
+}
+
+cmd_disable() {
+  local apply=0 force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in --apply) apply=1 ;; --force) force=1 ;; *) die "unknown option $1" ;; esac
+    shift
+  done
+  require_supported
+  # VMs with PR disks will not start while PR is off: do not pull it from under running ones.
+  local running
+  running=$(k get vmi -A -o json | jq -r '.items[]
+    | select([.spec.domain.devices.disks[]? | select(.lun.reservation==true)] | length > 0)
+    | "\(.metadata.namespace)/\(.metadata.name)"')
+  local cur; cur=$(pr_env_override)
+  echo "plan:"
+  pr_gate_present && echo "  1. remove the PersistentReservation feature gate" || echo "  1. gate already absent"
+  echo "  2. wait for virt-handler to drop pr-helper"
+  [ -n "$cur" ] && echo "  3. remove PR_HELPER_IMAGE=$cur from virt-operator (rollout)" || echo "  3. no image override to remove"
+  if [ -n "$running" ]; then
+    echo "running VMs with PR disks (stop them first):"; sed 's/^/  /' <<<"$running"
+    [ $force -eq 1 ] || { [ $apply -eq 1 ] && die "refusing while PR VMs are running (use --force to override)"; warn "--apply would refuse while these run"; }
+  fi
+  [ $apply -eq 1 ] || { echo "dry run only; re-run with --apply"; return 0; }
+  if pr_gate_present; then
+    local i
+    i=$(k -n $HS get kubevirt kubevirt -o json | jq -r '.spec.configuration.developerConfiguration.featureGates | index("PersistentReservation")')
+    k -n $HS patch kubevirt kubevirt --type=json -p "[{\"op\":\"test\",\"path\":\"/spec/configuration/developerConfiguration/featureGates/$i\",\"value\":\"PersistentReservation\"},{\"op\":\"remove\",\"path\":\"/spec/configuration/developerConfiguration/featureGates/$i\"}]"
+  fi
+  wait_pr_helper absent || warn "pr-helper still in virt-handler after 3 min"
+  if [ -n "$cur" ]; then k -n $HS set env deploy/virt-operator PR_HELPER_IMAGE-; k -n $HS rollout status deploy/virt-operator --timeout=5m; fi
+  k -n $HS rollout status ds/virt-handler --timeout=10m
+  echo "disabled."
+}
+
+case "${1:-}" in
+  check)      shift; cmd_check "$@" ;;
+  convert-vm) shift; cmd_convert_vm "$@" ;;
+  verify)     shift; cmd_verify "$@" ;;
+  enable)     shift; cmd_enable "$@" ;;
+  disable)    shift; cmd_disable "$@" ;;
+  *) sed -n '2,20p' "$0"; exit 2 ;;
+esac
