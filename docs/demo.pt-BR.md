@@ -79,7 +79,8 @@ Escolha uma:
 - UI do Harvester: VM proprietária > Force Stop. A função vai para o outro nó. A VM parada pode NÃO reiniciar
   sozinha (harvester#11835); inicie manualmente.
 - Ou mate o QEMU no host (`kill -9` do processo `qemu-system` do virt-launcher dessa VM). A VM reinicia automaticamente.
-O nó sobrevivente assume a reserva (fencing) e o SQL sobe nele.
+O nó sobrevivente assume a reserva (fencing) e o SQL sobe nele. Se alguém perguntar por que demora tanto,
+veja "Para onde vai o tempo do failover" abaixo.
 
 ### 7. Mostrar que os dados sobreviveram
 ```powershell
@@ -104,6 +105,36 @@ Test-Cluster -Node sqllab-fci-n1,sqllab-fci-n2 -Include Storage -ReportName C:\W
 O teste de PR registra e reserva um disco a partir de um nó e verifica que o outro nó é recusado com
 RESERVATION CONFLICT, o que prova que as reservas chegam ao storage. Resultado: todos os testes de Storage verdes
 (`PR-validation-<data>.htm`, copiado para `PR-validation-PASS.htm`; o passo 08 também salva uma cópia em `runbook/reports/`).
+
+## Para onde vai o tempo do failover (se alguém perguntar)
+
+O storage não é a parte lenta. Detalhamento de um movimento planejado e de um `kill -9`, a partir do log do cluster
+no nó sobrevivente (segundos, arredondados; a sonda tem só cerca de 2 s de resolução, então as linhas somam o total com folga de arredondamento):
+
+| Fase | Planejado (16,8 s de indisponibilidade) | `kill -9` (40,2 s de indisponibilidade) |
+|---|---|---|
+| Espera o timeout dos heartbeats | nenhuma | 21,4 |
+| Transferência para o nó sobrevivente | 1,2 | 6,3 |
+| Discos online (assume a reserva SCSI-3 PR; em paralelo com o IP) | 0,2 | 0,2 |
+| Endereço IP do SQL online | 3,7 | 3,7 |
+| Nome de rede do SQL online | 6,1 | 6,2 |
+| SQL Server sobe, até a sonda conectar | 5,7 | 2,7 |
+
+- **Falhas abruptas esperam o heartbeat.** `Get-Cluster | fl SameSubnetDelay,SameSubnetThreshold` mostra 1000 ms x 20,
+  então um nó morto só é declarado depois de 20 s de heartbeats perdidos. O movimento planejado pula essa espera. O Force Stop se comporta como o `kill -9`.
+- **Os discos levam cerca de 0,2 s.** Assumir a reserva no target LIO é rápido. As réplicas do Longhorn não participam:
+  matar uma VM não mexe no pod do LIO que serve as LUNs.
+- **O IP e o nome de rede custam cerca de 10 s** em todos os casos. A causa não foi investigada (provavelmente a detecção de
+  endereço duplicado e o registro no AD/DNS, sem confirmação).
+- **Sem explicação:** por que os movimentos planejados levaram de 16 a 51 s entre os builds. Os logs dos mais lentos não foram guardados.
+
+Para ver na sua própria execução, no nó sobrevivente logo depois do teste (`-TimeSpan` é em minutos):
+```powershell
+Get-ClusterLog -Node $env:COMPUTERNAME -Destination C:\Windows\Temp -TimeSpan 15 -UseLocalTime
+Select-String -Path C:\Windows\Temp\*_cluster.log -Pattern 'has transitioned from state' | % Line
+```
+Um `(Get-Cluster).SameSubnetThreshold` menor (digamos 5 a 10) deve encurtar os casos de falha abrupta, ao custo de mais
+failovers falsos. Não testado aqui.
 
 ## Pontos de conversa / limites
 - VMs com discos PR não fazem live migration: manutenção de nó = failover do cluster convidado e depois desligar a VM.

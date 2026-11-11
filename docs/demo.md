@@ -79,7 +79,8 @@ Pick one:
 - Harvester UI: the owner VM > Force Stop. The role moves to the other node. The stopped VM may NOT
   restart by itself (harvester#11835); Start it manually.
 - Or kill QEMU on the host (`kill -9` of the `qemu-system` process of that VM's virt-launcher). The VM restarts automatically.
-The surviving node takes the reservation over (fencing), SQL comes up there.
+The surviving node takes the reservation over (fencing), SQL comes up there. If someone asks why it takes
+that long, see "Where the failover time goes" below.
 
 ### 7. Show data survived
 ```powershell
@@ -104,6 +105,36 @@ Test-Cluster -Node sqllab-fci-n1,sqllab-fci-n2 -Include Storage -ReportName C:\W
 The PR test registers and reserves a disk from one node and checks that the other node is refused with a
 RESERVATION CONFLICT, which proves the reservations reach the storage. Result: all Storage tests green
 (`PR-validation-<date>.htm`, copied to `PR-validation-PASS.htm`; also saved in `runbook/reports/`).
+
+## Where the failover time goes (if someone asks)
+
+The storage is not the slow part. Breakdown of one planned move and one `kill -9`, from the surviving node's
+cluster log (seconds, rounded; the probe only has about 2 s of resolution, so the rows add up to the total within rounding):
+
+| Phase | Planned (16.8 s outage) | `kill -9` (40.2 s outage) |
+|---|---|---|
+| Wait for the heartbeats to time out | none | 21.4 |
+| Handover to the surviving node | 1.2 | 6.3 |
+| Disks online (SCSI-3 PR takeover; runs in parallel with the IP) | 0.2 | 0.2 |
+| SQL IP address online | 3.7 | 3.7 |
+| SQL network name online | 6.1 | 6.2 |
+| SQL Server starts, until the probe connects | 5.7 | 2.7 |
+
+- **Crash cases wait for the heartbeat.** `Get-Cluster | fl SameSubnetDelay,SameSubnetThreshold` shows 1000 ms x 20,
+  so a dead node is only declared after 20 s of missed heartbeats. A planned move skips this. Force Stop behaves like `kill -9`.
+- **The disks take about 0.2 s.** Taking over the reservation on the LIO target is fast. Longhorn replicas are not
+  involved: killing a VM does not touch the LIO pod that serves the LUNs.
+- **The IP and the network name cost about 10 s** in every case. The cause was not investigated (probably duplicate-address
+  detection and AD/DNS registration, unverified).
+- **Not explained:** why planned moves took anywhere from 16 to 51 s across builds. The logs of the slow ones were not kept.
+
+To see it for your own run, on the surviving node right after the test (`-TimeSpan` is in minutes):
+```powershell
+Get-ClusterLog -Node $env:COMPUTERNAME -Destination C:\Windows\Temp -TimeSpan 15 -UseLocalTime
+Select-String -Path C:\Windows\Temp\*_cluster.log -Pattern 'has transitioned from state' | % Line
+```
+A lower `(Get-Cluster).SameSubnetThreshold` (say 5 to 10) should shorten the crash cases, at the price of more false
+failovers. Not tried here.
 
 ## Talking points / limits
 - VMs with PR disks cannot be live-migrated: node maintenance = guest failover, then stop the VM.
