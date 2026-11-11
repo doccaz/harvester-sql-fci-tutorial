@@ -108,7 +108,11 @@ Antes de reconstruir nas mesmas LUNs defina `WIPE_LUNS=1` em `env.local`: reserv
 ## Bom saber
 
 - O Windows Update fica desligado nas VMs de propósito (passo 05): uma atualização cumulativa instalada enquanto o Failover-Clustering é adicionado faz a instalação falhar e ser desfeita.
-- Multipath no caminho de dados e uma SAN real não foram testados. O `./harvester-pr enable` não foi executado novamente a partir do estado final deste repositório.
+- Multipath no caminho de dados e uma SAN real não foram testados aqui (o artigo em Leitura adicional cobre os dois). O `./harvester-pr enable` não foi executado novamente a partir do estado final deste repositório.
+
+## Leitura adicional
+
+- [Windows failover clusters on SUSE Virtualization: shared SAN LUNs with SCSI-3 reservations](https://blog.5glinux.com/posts/wsfc-sql-fci-shared-san-luns-suse-virtualization/) (Alejandro Bonilla, 5glinux; em inglês): um artigo mais detalhado sobre o mesmo assunto, feito em uma SAN real (LUNs iSCSI NetApp ONTAP via Trident, com multipath).
 
 ## Créditos e licença
 MIT, veja [LICENSE](LICENSE). A abordagem da imagem dourada é baseada no [harvester-windows-cloudbase](https://github.com/abonillabeeche/harvester-windows-cloudbase) (Apache-2.0, clonado separadamente). Windows, SQL Server e a ISO do virtio-win estão sujeitos às suas próprias licenças e não são distribuídos aqui.
