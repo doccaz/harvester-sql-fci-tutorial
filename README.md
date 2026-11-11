@@ -11,7 +11,7 @@ A hands-on lab tutorial: build a two-node Windows Server 2022 / SQL Server 2016 
 |---|---|
 | 3 Windows VMs | `sqllab-dc1` (domain controller + witness share), `sqllab-fci-n1`, `sqllab-fci-n2` (cluster nodes, on different Harvester hosts) |
 | Shared storage | 3 RWX Block PVCs (quorum 1 GiB, data 4 GiB, log 2 GiB) attached as `lun` + `reservation: true`, served by a Linux LIO iSCSI target that stands in for a SAN |
-| Result | Storage validation passes (SCSI-3 PR + Disk Failover) and the SQL FCI is up on both nodes. Measured failover outages over several full builds: planned 16-51 s, Force Stop 33-42 s, `kill -9` of QEMU 43-52 s. They vary from run to run, so plan a demo around one minute |
+| Result | Storage validation passes (SCSI-3 PR + Disk Failover) and the SQL FCI is up on both nodes. Measured failover outages over several full builds: planned 16-51 s, Force Stop 33-42 s, `kill -9` of QEMU 40-52 s. They vary from run to run, so plan a demo around one minute |
 
 ## Architecture
 

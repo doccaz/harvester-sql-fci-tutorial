@@ -11,7 +11,7 @@ Tutorial de laboratório: monta um cluster de duas VMs Windows Server 2022 / SQL
 |---|---|
 | 3 VMs Windows | `sqllab-dc1` (controlador de domínio + share de witness), `sqllab-fci-n1` e `sqllab-fci-n2` (nós do cluster, em hosts Harvester diferentes) |
 | Armazenamento compartilhado | 3 PVCs Block RWX (quorum 1 GiB, dados 4 GiB, log 2 GiB) anexados como `lun` + `reservation: true`, servidos por um alvo iSCSI Linux LIO que faz o papel de SAN |
-| Resultado | A validação de armazenamento passa (SCSI-3 PR + Disk Failover) e a FCI do SQL sobe nos dois nós. Indisponibilidade medida em vários builds completos: failover planejado 16-51 s, Force Stop 33-42 s, `kill -9` do QEMU 43-52 s. Varia de execução para execução: planeje uma demonstração em torno de um minuto |
+| Resultado | A validação de armazenamento passa (SCSI-3 PR + Disk Failover) e a FCI do SQL sobe nos dois nós. Indisponibilidade medida em vários builds completos: failover planejado 16-51 s, Force Stop 33-42 s, `kill -9` do QEMU 40-52 s. Varia de execução para execução: planeje uma demonstração em torno de um minuto |
 
 ## Arquitetura
 
