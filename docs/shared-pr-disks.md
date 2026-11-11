@@ -205,7 +205,7 @@ before installing SQL Server (`/ACTION=InstallFailoverCluster`). **(Passed in th
   public SUSE VMDP `pvvxscsi` driver (even with the `BusType=0xA` workaround) the PR test failed:
   a second node could RESERVE a disk held by the first.
 - SQL Server 2016 SP2 FCI installed on that cluster; measured client downtime (probe from a third VM):
-  planned move 16-51 s, Force Stop of the owner VM 33-38 s, `kill -9` of QEMU 43-52 s; data persisted across
+  planned move 16-51 s, Force Stop of the owner VM 33-42 s, `kill -9` of QEMU 43-52 s; data persisted across
   moves. A Force-Stopped VM did not restart by itself under `RerunOnFailure` (harvester#11835).
 - Lab-only trap: a Linux LIO target stand-in for the SAN needs `/etc/target/pr` to exist on the node
   running it, otherwise every REGISTER takes effect but returns "LOGICAL UNIT COMMUNICATION FAILURE",
