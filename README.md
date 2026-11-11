@@ -5,6 +5,23 @@ A hands-on lab tutorial: build a two-node Windows Server 2022 / SQL Server 2016 
 > **Lab/tutorial only.** Evaluation media, throwaway passwords (`Sqllab2026`, set in `env.example`), no hardening, Windows Update switched off. Do not use it as a production template.
 > Português: veja [README.pt-BR.md](README.pt-BR.md).
 
+## The short version
+
+**You need:**
+- Harvester **v1.9.0** with 2 or more schedulable nodes.
+- Shared storage with SCSI-3 persistent reservations. Longhorn, Ceph and NFS cannot back these disks. The tutorial uses a Linux LIO iSCSI pod as a stand-in; a real SAN was not tested.
+- Three ISOs: Windows Server 2022 evaluation, SQL Server 2016 SP2 and virtio-win.
+- A VM network on your LAN with 5 free static IPs.
+
+**Then:**
+1. `cp env.example env.local` and set the kubeconfig, node names, IPs and network.
+2. `./harvester-pr enable --apply` turns on the PersistentReservation gate.
+3. Build the Windows golden image ([docs/golden-image.md](docs/golden-image.md), about 25 minutes, once).
+4. `runbook/run-all.sh` (about 1.5 hours). It pauses once for a manual SSH command on `NODE_A`, which only the LIO stand-in needs.
+5. `runbook/11-failover-tests.sh planned | stop --yes | kill --yes` measures the failovers.
+
+The details of each step are under [Quick start](#quick-start).
+
 ## What you get
 
 | Component | Detail |

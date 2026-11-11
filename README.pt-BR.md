@@ -5,6 +5,23 @@ Tutorial de laboratório: monta um cluster de duas VMs Windows Server 2022 / SQL
 > **Somente laboratório.** Mídia de avaliação, senhas descartáveis (`Sqllab2026`, definidas em `env.example`), sem hardening e com o Windows Update desligado. Não use como modelo de produção.
 > English: see [README.md](README.md). Os scripts e a maior parte da documentação estão em inglês.
 
+## Resumo
+
+**Você precisa de:**
+- Harvester **v1.9.0** com 2 ou mais nós agendáveis.
+- Armazenamento compartilhado com reservas persistentes SCSI-3. Longhorn, Ceph e NFS não servem para esses discos. O tutorial usa um pod iSCSI Linux LIO como substituto; uma SAN real não foi testada.
+- Três ISOs: Windows Server 2022 de avaliação, SQL Server 2016 SP2 e virtio-win.
+- Uma rede de VM na sua LAN com 5 IPs estáticos livres.
+
+**Depois:**
+1. `cp env.example env.local` e ajuste o kubeconfig, os nomes dos nós, os IPs e a rede.
+2. `./harvester-pr enable --apply` liga o feature gate PersistentReservation.
+3. Construa a imagem dourada do Windows ([docs/golden-image.md](docs/golden-image.md), cerca de 25 minutos, uma vez).
+4. `runbook/run-all.sh` (cerca de 1,5 hora). Ele pausa uma vez para um comando SSH manual no `NODE_A`, necessário só para o substituto LIO.
+5. `runbook/11-failover-tests.sh planned | stop --yes | kill --yes` mede os failovers.
+
+Os detalhes de cada passo estão em [Início rápido](#início-rápido).
+
 ## O que você obtém
 
 | Componente | Detalhe |
