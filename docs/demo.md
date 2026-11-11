@@ -109,7 +109,7 @@ RESERVATION CONFLICT, which proves the reservations reach the storage. Result: a
 - VMs with PR disks cannot be live-migrated: node maintenance = guest failover, then stop the VM.
 - A Harvester upgrade reverts the feature gate and pr-helper override: run `harvester-pr disable --apply` before, re-apply after.
 - Needs a SAN with SCSI-3 PR (Longhorn/Ceph/NFS cannot back these). Here a Linux LIO target on Longhorn stands in
-  (lab-only: it needs `/etc/target/pr` on its node, applied via CloudInit CR `pr-lab-lio-aptpl-dir`).
+  (lab-only: it needs `/etc/target/pr` on its node, applied via CloudInit CR `lio-san-aptpl-dir`).
 - Windows needs the upstream virtio-win `vioscsi` driver for the shared LUNs; the public VMDP `pvvxscsi` fails the PR test.
 - Not tested: multipath in the data path, a real SAN, more than two nodes.
 

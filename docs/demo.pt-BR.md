@@ -109,7 +109,7 @@ RESERVATION CONFLICT, o que prova que as reservas chegam ao storage. Resultado: 
 - VMs com discos PR não fazem live migration: manutenção de nó = failover do cluster convidado e depois desligar a VM.
 - Um upgrade do Harvester reverte o feature gate e o override do pr-helper: rode `harvester-pr disable --apply` antes e reaplique depois.
 - Exige um SAN com SCSI-3 PR (Longhorn/Ceph/NFS não servem). Aqui um target Linux LIO sobre Longhorn faz o papel do SAN
-  (só no lab: precisa de `/etc/target/pr` no nó dele, aplicado pelo CloudInit CR `pr-lab-lio-aptpl-dir`).
+  (só no lab: precisa de `/etc/target/pr` no nó dele, aplicado pelo CloudInit CR `lio-san-aptpl-dir`).
 - O Windows precisa do driver `vioscsi` do virtio-win upstream nas LUNs compartilhadas; o `pvvxscsi` público do VMDP falha no teste de PR.
 - Não testado: multipath no caminho de dados, um SAN real, mais de dois nós.
 

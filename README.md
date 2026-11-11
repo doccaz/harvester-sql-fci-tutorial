@@ -83,14 +83,13 @@ If a step fails, `runbook/README.md` lists the problems hit while building this 
 |---|---|
 | The 3 Windows VMs and their root disks | `runbook/99-teardown.sh --yes` (keeps the LUNs, golden image and node config) |
 | ISO server pod, its volume and the two ISO images | `runbook/03-iso-server.sh down` |
-| Shared LUNs and the LIO target (untested) | delete PVCs and PVs `fci-quorum`, `fci-sqldata`, `fci-sqllog`, then `helm uninstall pr-lab` |
+| Shared LUNs and the LIO target (untested) | delete PVCs and PVs `fci-quorum`, `fci-sqldata`, `fci-sqllog`, then `helm uninstall lio-san` |
 | Golden image | `kubectl -n labs delete virtualmachineimage win2022-cloudbase` |
 
 Before rebuilding on the same LUNs set `WIPE_LUNS=1` in `env.local`: stale SCSI-3 reservations survive VM deletion and would block the new cluster.
 
 ## Good to know
 
-- The Helm release, CloudInit CR and namespace are called `pr-lab` / `iscsi-target-prlab`, after the author's earlier persistent-reservation test. The chart's `values-fci.yaml` also defines two spare targets (`pr-witness`, `pr-data`) from that test. The tutorial does not use them and they are harmless.
 - Windows Update is switched off on the VMs on purpose (step 05): a cumulative update that installs while Failover-Clustering is being added makes the install fail and roll back.
 - Multipath in the data path and a real SAN were not tested. `./harvester-pr enable` was not re-run from this repository's final state.
 

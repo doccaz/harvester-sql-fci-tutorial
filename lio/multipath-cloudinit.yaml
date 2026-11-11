@@ -1,9 +1,9 @@
-# DRAFT - not applied. Persistent node config for SCSI-3 PR with native lun disks.
+# Persistent node config for SCSI-3 PR with native lun disks. Applied by runbook/01-harvester-nodes.sh (CR 2 always, CR 1 only with WITH_MULTIPATH=1).
 #
 # CR 1 (both workers): multipath scoped ONLY to the SAN vendor (LIO-ORG here; replace with the
 #   real array's vendor/product), reservation_key file, skip_kpartx, /etc/multipath 0755, multipathd on.
 #   Everything else stays blacklisted so local disks / Longhorn IET devices are never claimed.
-# CR 2 (node-a only, LAB ONLY): the Linux LIO target stands in for the SAN and the kernel target
+# CR 2 (NODE_A only, LAB ONLY): the Linux LIO target stands in for the SAN and the kernel target
 #   needs /etc/target/pr to store reservation state (else every REGISTER returns
 #   "LOGICAL UNIT COMMUNICATION FAILURE" after taking effect). A real SAN does not need this.
 #
@@ -19,7 +19,7 @@ metadata:
   name: pr-multipath
 spec:
   matchSelector:
-    node-role.kubernetes.io/control-plane: "true"   # node-a + node-b (not witness-node)
+    node-role.kubernetes.io/control-plane: "true"   # the two workers (not the witness node)
   filename: /oem/95_multipath.yaml
   paused: false
   contents: |
@@ -69,10 +69,10 @@ spec:
 apiVersion: node.harvesterhci.io/v1beta1
 kind: CloudInit
 metadata:
-  name: pr-lab-lio-aptpl-dir
+  name: lio-san-aptpl-dir
 spec:
   matchSelector:
-    kubernetes.io/hostname: node-a   # node running the lab LIO pod
+    kubernetes.io/hostname: __NODE_A__   # node running the lab LIO pod; 01-harvester-nodes.sh fills in NODE_A from env.local
   filename: /oem/96_lio_aptpl.yaml
   paused: false
   contents: |

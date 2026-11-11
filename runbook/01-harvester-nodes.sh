@@ -2,10 +2,10 @@
 # Lab-only: create /etc/target/pr on the node running the Linux LIO target (stands in for the SAN). A real SAN does not need this.
 # Optional (WITH_MULTIPATH=1): scoped multipath CR on both workers.
 source "$(dirname "$0")/lib.sh"
-python3 - "$ROOT/lio/multipath-cloudinit.yaml" "${WITH_MULTIPATH:-0}" <<'PY' | kubectl apply -f -
+python3 - "$ROOT/lio/multipath-cloudinit.yaml" "${WITH_MULTIPATH:-0}" <<'PY' | sed "s/__NODE_A__/$NODE_A/" | kubectl apply -f -
 import sys, re
 docs = re.split(r'(?m)^---\s*$', open(sys.argv[1]).read())
-keep = [d for d in docs if ('pr-lab-lio-aptpl-dir' in d) or (sys.argv[2] == '1' and 'name: pr-multipath' in d)]
+keep = [d for d in docs if ('lio-san-aptpl-dir' in d) or (sys.argv[2] == '1' and 'name: pr-multipath' in d)]
 print('\n---\n'.join(keep))
 PY
 cat <<MSG

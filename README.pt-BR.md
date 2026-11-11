@@ -83,14 +83,13 @@ Se um passo falhar, `runbook/README.md` lista os problemas encontrados na constr
 |---|---|
 | As 3 VMs Windows e seus discos raiz | `runbook/99-teardown.sh --yes` (mantém as LUNs, a imagem dourada e a configuração dos nós) |
 | Pod do servidor de ISOs, seu volume e as duas imagens ISO | `runbook/03-iso-server.sh down` |
-| LUNs compartilhadas e o alvo LIO (não testado) | apague os PVCs e PVs `fci-quorum`, `fci-sqldata`, `fci-sqllog` e depois `helm uninstall pr-lab` |
+| LUNs compartilhadas e o alvo LIO (não testado) | apague os PVCs e PVs `fci-quorum`, `fci-sqldata`, `fci-sqllog` e depois `helm uninstall lio-san` |
 | Imagem dourada | `kubectl -n labs delete virtualmachineimage win2022-cloudbase` |
 
 Antes de reconstruir nas mesmas LUNs defina `WIPE_LUNS=1` em `env.local`: reservas SCSI-3 antigas sobrevivem à exclusão das VMs e bloqueariam o novo cluster.
 
 ## Bom saber
 
-- O release Helm, o CR CloudInit e o namespace se chamam `pr-lab` / `iscsi-target-prlab`, por causa de um teste anterior de reservas persistentes do autor. O `values-fci.yaml` do chart também define dois alvos sobressalentes (`pr-witness`, `pr-data`) desse teste. O tutorial não os usa e eles são inofensivos.
 - O Windows Update fica desligado nas VMs de propósito (passo 05): uma atualização cumulativa instalada enquanto o Failover-Clustering é adicionado faz a instalação falhar e ser desfeita.
 - Multipath no caminho de dados e uma SAN real não foram testados. O `./harvester-pr enable` não foi executado novamente a partir do estado final deste repositório.
 
